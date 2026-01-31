@@ -645,10 +645,6 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
-    - target: {fileID: 1639562911807862400, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
-      propertyPath: m_GravityScale
-      value: 5
-      objectReference: {fileID: 0}
     - target: {fileID: 5865579426773759057, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
@@ -785,18 +781,6 @@ PrefabInstance:
     - target: {fileID: 509167187126478119, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 2934888870376989907, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
-      propertyPath: m_SizeDelta.x
-      value: 430
-      objectReference: {fileID: 0}
-    - target: {fileID: 3711793412907484938, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
-      propertyPath: m_SizeDelta.x
-      value: 400
-      objectReference: {fileID: 0}
-    - target: {fileID: 6986101424396753069, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
-      propertyPath: m_SizeDelta.x
-      value: 400
       objectReference: {fileID: 0}
     - target: {fileID: 7828577792227641781, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
       propertyPath: m_Name
