@@ -782,6 +782,18 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 2934888870376989907, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
+      propertyPath: m_SizeDelta.x
+      value: 430
+      objectReference: {fileID: 0}
+    - target: {fileID: 3711793412907484938, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
+      propertyPath: m_SizeDelta.x
+      value: 400
+      objectReference: {fileID: 0}
+    - target: {fileID: 6986101424396753069, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
+      propertyPath: m_SizeDelta.x
+      value: 400
+      objectReference: {fileID: 0}
     - target: {fileID: 7828577792227641781, guid: aa1fcf52abba5c148a4dc2ecd88dd357, type: 3}
       propertyPath: m_Name
       value: HealthBar
