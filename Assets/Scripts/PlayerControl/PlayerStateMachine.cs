@@ -5,6 +5,19 @@ using static AttackHitInfo;
 
 public class PlayerStateMachine : MonoBehaviour
 {
+    // ==== 配置项: Serializable fields ==== //
+    [Header("动画设置")]
+    [Tooltip("攻击动画参数名")]
+    [SerializeField] private string attackAnimParam = "attack";
+    [Tooltip("跳跃动画参数名")]
+    [SerializeField] private string jumpAnimParam = "jump";
+    [Tooltip("格挡动画参数名")]
+    [SerializeField] private string blockAnimParam = "block";
+    [Tooltip("行走动画参数名")]
+    [SerializeField] private string walkAnimParam = "walking";
+    [Tooltip("腾空动画参数名")]
+    [SerializeField] private string floatAnimParam = "floating";
+
     [Header("按键绑定")]
     [Tooltip("左移按键")]
     [SerializeField] private KeyCode moveLeftKey = KeyCode.A;
@@ -65,6 +78,8 @@ public class PlayerStateMachine : MonoBehaviour
 
 
 
+    // ==== 内部状态数据 ==== //
+    private Animator _animator;
     private HierarchicalStateMachine _stateMachine;
     private Vector2 _movementInput;
     private float _facingDirection = 1f;
@@ -96,7 +111,7 @@ public class PlayerStateMachine : MonoBehaviour
     private HitInfo incomingHitInfo = new();
     private HitInfo BlockedHitInfo = new();
 
-    private string ActiveState => _stateMachine?.CurrentStateName ?? string.Empty;
+    public string ActiveState => _stateMachine?.CurrentStateName ?? string.Empty;
 
     private SpriteRenderer _spriteRenderer;
     private Color _spriteBaseColor = Color.white;
@@ -117,19 +132,23 @@ public class PlayerStateMachine : MonoBehaviour
     private bool _skipJumpExitVelocityReset;
     private bool _preserveJumpHoldTimer;
 
+    // ==== Unity 生命周期 ==== //
     private void Awake()
     {
+        _animator = GetComponent<Animator>();
         _spriteRenderer = GetComponent<SpriteRenderer>();
         BuildStateMachine();
         BuildBlockActionChain();
     }
 
+    // ==== Unity 事件 ==== //
     private void Start()
     {
         grounded = false;
         _stateMachine.Enter();
     }
 
+    // ==== 主循环: 输入与状态更新 ==== //
     private void Update()
     {
         jumpHoldTimer.Update();
@@ -148,6 +167,7 @@ public class PlayerStateMachine : MonoBehaviour
         ApplySpriteColor();
     }
 
+    // ==== 输入处理 ==== //
     private void UpdateInput()
     {
         float horizontal = 0f;
@@ -173,6 +193,7 @@ public class PlayerStateMachine : MonoBehaviour
             {
                 _facingDirection = 1f;
             }
+            _spriteRenderer.flipX = _facingDirection > 0f;
         }
 
         _movementInput = horizontal != 0f ? new Vector2(horizontal, 0f) : Vector2.zero;
@@ -181,6 +202,7 @@ public class PlayerStateMachine : MonoBehaviour
         if (activeState == "Stand" || activeState == "Walk")
         {
             var goalState = horizontal != 0f ? "Walk" : "Stand";
+            _animator.SetBool(walkAnimParam, horizontal != 0f);
             if (activeState != goalState)
             {
                 _stateMachine.TransitionTo(goalState);
@@ -188,6 +210,7 @@ public class PlayerStateMachine : MonoBehaviour
         }
 
         // (站立 || 行走) => 跳跃
+        _animator.SetBool(floatAnimParam, !grounded);
         if (InputPreInput.GetKeyDown(jumpKey, jumpInputBuffer) && (activeState == "Stand" || activeState == "Walk"))
         {
             _shouldApplyJumpVelocity = true;
@@ -229,10 +252,12 @@ public class PlayerStateMachine : MonoBehaviour
         }
     }
 
+    // ==== 状态机结构 ==== //
     private void BuildStateMachine()
     {
         _stateMachine = new HierarchicalStateMachine("Player");
 
+        // 站立
         var standState = new SimpleState(
             "Stand",
             enter: () =>
@@ -241,6 +266,7 @@ public class PlayerStateMachine : MonoBehaviour
             },
             stay: StayStand);
 
+        // 行走
         var walkState = new SimpleState(
             "Walk",
             enter: () =>
@@ -249,42 +275,49 @@ public class PlayerStateMachine : MonoBehaviour
             },
             stay: StayWalk);
 
+        // 跳跃
         var jumpState = new SimpleState(
             "Jump",
             enter: StartJump,
             stay: StayJump,
             exit: ExitJump);
 
+        // 冲刺
         var dashState = new SimpleState(
             "Dash",
             enter: StartDash,
             stay: StayDash,
             exit: DashExit);
 
+        // 普攻
         var attackState = new SimpleState(
             "Attack",
             enter: StartAttack,
             stay: StayAttack,
             exit: ExitAttack);
 
+        // 浮空普攻
         var floatAttackState = new SimpleState(
             "FloatAttack",
             enter: StartFloatAttack,
             stay: StayFloatAttack,
             exit: ExitFloatAttack);
 
+        // 格挡
         var blockState = new SimpleState(
             "Block",
             enter: StartBlock,
             stay: StayBlock,
             exit: ExitBlock);
 
+        // 受伤
         var hurtState = new SimpleState(
             "Hurt",
             enter: StartHurt,
             stay: StayHurt,
             exit: ExitHurt);
 
+        // 注册状态
         _stateMachine
             .RegisterState(standState, true)
             .RegisterState(walkState)
@@ -296,6 +329,7 @@ public class PlayerStateMachine : MonoBehaviour
             .RegisterState(hurtState);
     }
 
+    // ==== 基础移动状态 ==== //
     private void StayStand()
     {
         ApplyHorizontalMovement();
@@ -321,12 +355,13 @@ public class PlayerStateMachine : MonoBehaviour
         vel.x = _movementInput.x * walkSpeed;
     }
 
+    // ==== 跳跃逻辑 ==== //
     private void StartJump()
     {
-        SetSpriteColor(Color.magenta);
         if (_shouldApplyJumpVelocity)
         {
             vel.y = jumpVelocity;
+            _animator.SetTrigger(jumpAnimParam);
             jumpHoldTimer.StartTimer(jumpHoldTime);
             _shortHopApplied = false;
         }
@@ -383,6 +418,7 @@ public class PlayerStateMachine : MonoBehaviour
         vel.y -= gravity * Time.deltaTime;
     }
 
+    // ==== 冲刺逻辑 ==== //
     private void StartDash()
     {
         SetSpriteColor(Color.blue);
@@ -417,6 +453,7 @@ public class PlayerStateMachine : MonoBehaviour
         dashCDTimer.StartTimer(dashCooldown);
     }
 
+    // ==== 受伤逻辑 ==== //
     private void StartHurt()
     {
         vel = Vector2.zero;
@@ -453,9 +490,10 @@ public class PlayerStateMachine : MonoBehaviour
         }
     }
 
+    // ==== 攻击逻辑 ==== //
     private void StartAttack()
     {
-        SetSpriteColor(Color.green);
+        _animator.SetTrigger(attackAnimParam);
         vel = Vector2.zero;
         if (_attackCoroutine != null)
         {
@@ -488,9 +526,10 @@ public class PlayerStateMachine : MonoBehaviour
         SetSpriteColor(Color.white);
     }
 
+    // ==== 浮空攻击 ==== //
     private void StartFloatAttack()
     {
-        SetSpriteColor(Color.green);
+        _animator.SetTrigger(attackAnimParam);
         if (_floatAttackCoroutine != null)
         {
             StopCoroutine(_floatAttackCoroutine);
@@ -536,6 +575,7 @@ public class PlayerStateMachine : MonoBehaviour
         SetSpriteColor(Color.white);
     }
 
+    // ==== 格挡流程 ==== //
     private void StartBlock()
     {
         if(blockActionChain.IsPlaying)
@@ -558,6 +598,7 @@ public class PlayerStateMachine : MonoBehaviour
         BlockedHitInfo.Clear();
     }
 
+    // ==== 格挡动作链构建 ==== //
     private void BuildBlockActionChain()
     {
         var startCursor = blockActionChain.Start;
@@ -640,7 +681,7 @@ public class PlayerStateMachine : MonoBehaviour
 
         IEnumerator BlockCheckAction(MonoBehaviour _)
         {
-            SetSpriteColor(new Color(1f, 0.5f, 0f, 1f));
+            _animator.SetTrigger(blockAnimParam);
             tryCatchInfo = true;
             float elapsed = 0f;
             while (elapsed < blockDuration)
@@ -754,6 +795,7 @@ public class PlayerStateMachine : MonoBehaviour
 
     }
 
+    // ==== 碰撞与击中判断 ==== //
     private void TryRegisterGroundContact(Collision2D collision)
     {
         if (!collision.gameObject.CompareTag("Block"))
@@ -844,11 +886,11 @@ public class PlayerStateMachine : MonoBehaviour
         }
     }
 
+    // ==== 视觉与状态工具 ==== //
     // 用变色暂时代替动画效果。
     private void SetSpriteColor(Color color)
     {
-        _spriteBaseColor = color;
-        ApplySpriteColor();
+        // 弃用
     }
 
     private void ApplySpriteColor()
