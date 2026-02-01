@@ -53,13 +53,19 @@ public class SawMove : MonoBehaviour
     [Header("火花设置")]
     [SerializeField] private GameObject sparkPrefab; // 火花预制体
     [SerializeField] private int sparkPoolSize = 80; // 对象池大小
+    [SerializeField] private float sparkLifetime = 2f; // 火花生命周期
+
+    [Header("火花生成半径设置")]
+    [SerializeField] private float firstActionSparkRadius = 10f; // 第一个动作火花生成半径
+    [SerializeField] private float secondActionSparkRadius = 10f; // 第二个动作火花生成半径
+    [SerializeField] private float fourthActionSparkRadius = 10f; // 第四个动作火花生成半径
+    [SerializeField] private float fourthEndSparkRadius = 10f; // 第四个动作结尾火花生成半径
 
     [Header("第一个动作火花设置")]
     [SerializeField] private int sparkCountOnHit = 15; // 触地时生成的火花数量
     [SerializeField] private float minSparkForce = 5f; // 火花最小喷射力
     [SerializeField] private float maxSparkForce = 12f; // 火花最大喷射力
     [SerializeField] private float sparkUpwardBias = 0.3f; // 火花向上偏置（0-1，越高越向上）
-    [SerializeField] private float sparkLifetime = 2f; // 火花生命周期
 
     [Header("第二个动作火花设置")]
     [SerializeField] private int sparksPerFrame = 3; // 每帧释放的火花数量
@@ -402,7 +408,7 @@ public class SawMove : MonoBehaviour
     {
         for (int i = 0; i < sparkCountOnHit; i++)
         {
-            SpawnSpark(minSparkForce, maxSparkForce, sparkUpwardBias);
+            SpawnSpark(minSparkForce, maxSparkForce, sparkUpwardBias, firstActionSparkRadius);
         }
     }
 
@@ -411,7 +417,7 @@ public class SawMove : MonoBehaviour
     {
         for (int i = 0; i < fourthEndSparkCount; i++)
         {
-            SpawnSpark(fourthEndMinSparkForce, fourthEndMaxSparkForce, fourthEndSparkUpwardBias);
+            SpawnSpark(fourthEndMinSparkForce, fourthEndMaxSparkForce, fourthEndSparkUpwardBias, fourthEndSparkRadius);
         }
     }
 
@@ -460,10 +466,10 @@ public class SawMove : MonoBehaviour
         // 更新已移动距离
         secondMovedDistance += moveThisFrame;
 
-        // 每帧释放火花
+        // 每帧释放火花（在指定半径的圆内随机生成）
         for (int i = 0; i < sparksPerFrame; i++)
         {
-            SpawnSpark(secondMinSparkForce, secondMaxSparkForce, secondSparkUpwardBias);
+            SpawnSpark(secondMinSparkForce, secondMaxSparkForce, secondSparkUpwardBias, secondActionSparkRadius);
         }
 
         // 检查是否到达终点
@@ -546,10 +552,10 @@ public class SawMove : MonoBehaviour
             // 更新已移动距离
             fourthMovedDistance += moveThisFrame;
 
-            // 每帧释放火花
+            // 每帧释放火花（在指定半径的圆内随机生成）
             for (int i = 0; i < fourthSparksPerFrame; i++)
             {
-                SpawnSpark(fourthMinSparkForce, fourthMaxSparkForce, fourthSparkUpwardBias);
+                SpawnSpark(fourthMinSparkForce, fourthMaxSparkForce, fourthSparkUpwardBias, fourthActionSparkRadius);
             }
 
             // 检查是否到达终点（返回到第二个动作开始的位置）
@@ -613,18 +619,25 @@ public class SawMove : MonoBehaviour
         }
     }
 
-    // 生成单个火花
-    private void SpawnSpark(float minForce, float maxForce, float upwardBias)
+    // 生成单个火花（在指定半径的圆内随机位置生成）
+    private void SpawnSpark(float minForce, float maxForce, float upwardBias, float spawnRadius)
     {
         // 从对象池获取火花
         GameObject spark = GetSparkFromPool();
 
-        // 设置火花位置（可以添加一点随机偏移）
+        // 在半径为spawnRadius的圆内随机生成位置
+        // 生成随机角度和随机半径
+        float randomAngle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
+        float randomRadius = Random.Range(0f, spawnRadius);
+
+        // 计算随机偏移
         Vector3 randomOffset = new Vector3(
-            Random.Range(-0.3f, 0.3f),
-            Random.Range(-0.2f, 0.2f),
+            Mathf.Cos(randomAngle) * randomRadius,
+            Mathf.Sin(randomAngle) * randomRadius,
             0
         );
+
+        // 设置火花位置
         spark.transform.position = transform.position + randomOffset;
 
         // 获取或添加Rigidbody2D组件
@@ -722,7 +735,31 @@ public class SawMove : MonoBehaviour
         fifthTeleportDistance = newDistance;
     }
 
-    // 在编辑器中绘制移动路径（可视化辅助）
+    // 公共方法：外部修改第一个动作火花生成半径
+    public void SetFirstActionSparkRadius(float newRadius)
+    {
+        firstActionSparkRadius = newRadius;
+    }
+
+    // 公共方法：外部修改第二个动作火花生成半径
+    public void SetSecondActionSparkRadius(float newRadius)
+    {
+        secondActionSparkRadius = newRadius;
+    }
+
+    // 公共方法：外部修改第四个动作火花生成半径
+    public void SetFourthActionSparkRadius(float newRadius)
+    {
+        fourthActionSparkRadius = newRadius;
+    }
+
+    // 公共方法：外部修改第四个动作结尾火花生成半径
+    public void SetFourthEndSparkRadius(float newRadius)
+    {
+        fourthEndSparkRadius = newRadius;
+    }
+
+    // 在编辑器中绘制移动路径和火花生成半径（可视化辅助）
     void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.red;
@@ -766,9 +803,30 @@ public class SawMove : MonoBehaviour
         Gizmos.DrawLine(teleportPos, currentPos);
         DrawArrow(teleportPos, currentPos);
 
-        // 标记第四个动作结尾火花效果位置
+        // 标记火花生成半径（在关键位置显示）
         Gizmos.color = Color.cyan;
-        Gizmos.DrawWireSphere(firstEndPos, 0.5f);
+
+        // 第一个动作火花生成半径
+        Gizmos.DrawWireSphere(firstEndPos, firstActionSparkRadius);
+
+        // 第二个动作火花生成半径（沿路径显示几个示例位置）
+        for (int i = 0; i < 5; i++)
+        {
+            float t = i / 4f;
+            Vector3 samplePos = Vector3.Lerp(firstEndPos, secondEndPos, t);
+            Gizmos.DrawWireSphere(samplePos, secondActionSparkRadius);
+        }
+
+        // 第四个动作火花生成半径（沿返回路径显示几个示例位置）
+        for (int i = 0; i < 5; i++)
+        {
+            float t = i / 4f;
+            Vector3 samplePos = Vector3.Lerp(secondEndPos, firstEndPos, t);
+            Gizmos.DrawWireSphere(samplePos, fourthActionSparkRadius);
+        }
+
+        // 第四个动作结尾火花生成半径
+        Gizmos.DrawWireSphere(firstEndPos, fourthEndSparkRadius);
 
         // 标记起始位置
         Gizmos.color = Color.white;
