@@ -5,6 +5,7 @@ using UnityEngine;
 public interface IState
 {
     string Name { get; }
+    string CurrentStateName => "";
     void Enter();
     void Stay();
     void Exit();
@@ -12,15 +13,17 @@ public interface IState
 
 public sealed class SimpleState : IState
 {
-    public string Name { get; }
+    public string Name => _name;
+    public string CurrentStateName => _name;
 
+    private string _name;
     private readonly Action _enter;
     private readonly Action _stay;
     private readonly Action _exit;
 
     public SimpleState(string name, Action enter = null, Action stay = null, Action exit = null)
     {
-        Name = name;
+        _name = name;
         _enter = enter ?? (() => { });
         _stay = stay ?? (() => { });
         _exit = exit ?? (() => { });
@@ -38,12 +41,14 @@ public class HierarchicalStateMachine : IState
     private IState _currentState;
     private string _initialStateName;
 
-    public string Name { get; }
-    public string CurrentStateName => _currentState?.Name ?? "";
+    public string Name => _name;
+    public string CurrentStateName => _currentState != null ? _currentState.CurrentStateName : "";
+
+    private string _name;
 
     public HierarchicalStateMachine(string name)
     {
-        Name = name;
+        _name = name;
     }
 
     public HierarchicalStateMachine RegisterState(IState state, bool isInitial = false)
@@ -157,5 +162,43 @@ public class HierarchicalStateMachine : IState
         public string Trigger { get; }
         public string FromState { get; }
         public string ToState { get; }
+    }
+}
+
+public sealed class HierarchicalStateProxy : IState
+{
+    private readonly HierarchicalStateMachine _inner;
+    private readonly Action _enter;
+    private readonly Action _stay;
+    private readonly Action _exit;
+
+    public string Name => _inner?.Name ?? string.Empty;
+
+    public string CurrentStateName => _inner?.CurrentStateName ?? Name;
+
+    public HierarchicalStateProxy(HierarchicalStateMachine inner, Action enter = null, Action stay = null, Action exit = null)
+    {
+        _inner = inner;
+        _enter = enter;
+        _stay = stay;
+        _exit = exit;
+    }
+
+    public void Enter()
+    {
+        _enter?.Invoke();
+        _inner?.Enter();
+    }
+
+    public void Stay()
+    {
+        _stay?.Invoke();
+        _inner?.Stay();
+    }
+
+    public void Exit()
+    {
+        _exit?.Invoke();
+        _inner?.Exit();
     }
 }
