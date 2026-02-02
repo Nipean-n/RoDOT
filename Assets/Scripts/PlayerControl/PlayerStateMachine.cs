@@ -1,5 +1,7 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 using static AttackHitInfo;
 
@@ -17,6 +19,8 @@ public class PlayerStateMachine : MonoBehaviour
     [SerializeField] private string walkAnimParam = "walking";
     [Tooltip("腾空动画参数名")]
     [SerializeField] private string floatAnimParam = "floating";
+    [Tooltip("冲刺动画名")]
+    [SerializeField] private string dashAnimName = "dash";
 
     [Header("按键绑定")]
     [Tooltip("左移按键")]
@@ -56,6 +60,14 @@ public class PlayerStateMachine : MonoBehaviour
     [Tooltip("重力加速度")]
     [SerializeField] private float gravity = 30f;
 
+    [Header("攻击")]
+    [Tooltip("攻击预输入时长")]
+    [SerializeField] private float attackInputBuffer = 0.1f;
+    [Tooltip("地面攻击持续时长")]
+    [SerializeField] private float attackDuration = 0.5f;
+    [Tooltip("浮空攻击持续时长")]
+    [SerializeField] private float floatAttackDuration = 0.5f;
+
     [Header("格挡")]
     [Tooltip("格挡预输入时长")]
     [SerializeField] private float blockInputBuffer = 0.15f;
@@ -79,8 +91,21 @@ public class PlayerStateMachine : MonoBehaviour
 
 
     // ==== 内部状态数据 ==== //
+    private const string GroundStateName = "Ground";
+    private const string StandStateName = "Stand";
+    private const string WalkStateName = "Walk";
+    private const string AirStateName = "Air";
+    private const string JumpSubStateName = "Jump";
+    private const string FloatingSubStateName = "Floating";
+    private const string AttackStateName = "Attack";
+    private const string AttackGroundSubStateName = "AttackGround";
+    private const string AttackFloatSubStateName = "FloatAttack";
+
     private Animator _animator;
     private HierarchicalStateMachine _stateMachine;
+    private HierarchicalStateMachine _groundMovementState;
+    private HierarchicalStateMachine _airMovementState;
+    private HierarchicalStateMachine _attackStateMachine;
     private Vector2 _movementInput;
     private float _facingDirection = 1f;
     private Coroutine _dashCoroutine;
@@ -88,15 +113,18 @@ public class PlayerStateMachine : MonoBehaviour
     private Coroutine _floatAttackCoroutine;
     private Coroutine _hurtCoroutine;
     private ActSeq blockActionChain = new();
+    private float _defaultAnimatorSpeed;
+    private bool _pendingFloatAttack;
 
     struct HitInfo
     {
-        public bool IsValid => Source != null;
+        public bool IsValid => Source != null && !used;
         public float Damage;
         public AttackGrade Grade;
         public float StunDuration;
         public float ParryWindow;
         public GameObject Source;
+        public bool used;
 
         public void Clear()
         {
@@ -105,14 +133,26 @@ public class PlayerStateMachine : MonoBehaviour
             StunDuration = 0f;
             ParryWindow = 0f;
             Source = null;
+            used = false;
         }
     }
     private bool tryCatchInfo = false;
     private HitInfo incomingHitInfo = new();
     private HitInfo BlockedHitInfo = new();
 
-    public string ActiveState => _stateMachine?.CurrentStateName ?? string.Empty;
+    public string ActiveState
+    {
+        get
+        {
+            if (_stateMachine == null)
+            {
+                return string.Empty;
+            }
 
+            return _stateMachine.CurrentStateName;
+        }
+    }
+    
     private SpriteRenderer _spriteRenderer;
     private Color _spriteBaseColor = Color.white;
     private bool _invincibleAlphaActive;
@@ -128,7 +168,6 @@ public class PlayerStateMachine : MonoBehaviour
     private Timer dashCDTimer = new();
     private Timer invincibleTimer = new();
 
-    private bool _shouldApplyJumpVelocity = true;
     private bool _skipJumpExitVelocityReset;
     private bool _preserveJumpHoldTimer;
 
@@ -137,6 +176,7 @@ public class PlayerStateMachine : MonoBehaviour
     {
         _animator = GetComponent<Animator>();
         _spriteRenderer = GetComponent<SpriteRenderer>();
+        _defaultAnimatorSpeed = _animator != null ? _animator.speed : 1f;
         BuildStateMachine();
         BuildBlockActionChain();
     }
@@ -171,6 +211,8 @@ public class PlayerStateMachine : MonoBehaviour
     private void UpdateInput()
     {
         float horizontal = 0f;
+        var activeState = ActiveState;
+
         if (Input.GetKey(moveLeftKey))
         {
             horizontal -= 1f;
@@ -181,9 +223,7 @@ public class PlayerStateMachine : MonoBehaviour
             horizontal += 1f;
         }
 
-        var activeState = ActiveState;
-
-        if (activeState != "FloatAttack")
+        if (activeState != "FloatAttack" && activeState != "Attack")
         {
             if (horizontal < 0f)
             {
@@ -199,56 +239,63 @@ public class PlayerStateMachine : MonoBehaviour
         _movementInput = horizontal != 0f ? new Vector2(horizontal, 0f) : Vector2.zero;
 
         // 站立 <=> 行走
-        if (activeState == "Stand" || activeState == "Walk")
+        if (activeState == StandStateName || activeState == WalkStateName)
         {
-            var goalState = horizontal != 0f ? "Walk" : "Stand";
+            var goalState = horizontal != 0f ? WalkStateName : StandStateName;
             _animator.SetBool(walkAnimParam, horizontal != 0f);
             if (activeState != goalState)
             {
-                _stateMachine.TransitionTo(goalState);
+                SwitchToGroundSubState(goalState);
             }
         }
 
         // (站立 || 行走) => 跳跃
         _animator.SetBool(floatAnimParam, !grounded);
-        if (InputPreInput.GetKeyDown(jumpKey, jumpInputBuffer) && (activeState == "Stand" || activeState == "Walk"))
+
+        if (!grounded && (activeState == StandStateName || activeState == WalkStateName))
         {
-            _shouldApplyJumpVelocity = true;
+            SwitchToAirSubState(FloatingSubStateName);
+        }
+
+        if (InputPreInput.GetKeyDown(jumpKey, jumpInputBuffer) &&
+            (activeState == StandStateName || activeState == WalkStateName))
+        {
             InputPreInput.ConsumeBufferedKeyDown(jumpKey);
-            _stateMachine.TransitionTo("Jump");
+            SwitchToAirSubState(JumpSubStateName);
         }
 
         // (站立 || 行走) => 冲刺
         if (InputPreInput.GetKeyDown(dashKey, dashInputBuffer) &&
             !dashCDTimer.IsRunning &&
             Mathf.Abs(_facingDirection) > Mathf.Epsilon &&
-            (activeState == "Stand" || activeState == "Walk"))
+            (activeState == StandStateName || activeState == WalkStateName))
         {
             _stateMachine.TransitionTo("Dash");
             InputPreInput.ConsumeBufferedKeyDown(dashKey);
         }
 
         // (站立 || 行走) => 格挡
-        if (InputPreInput.GetKeyDown(blockKey, blockInputBuffer) && (activeState == "Stand" || activeState == "Walk"))
+        if (InputPreInput.GetKeyDown(blockKey, blockInputBuffer) && (activeState == StandStateName || activeState == WalkStateName))
         {
             _stateMachine.TransitionTo("Block");
             InputPreInput.ConsumeBufferedKeyDown(blockKey);
         }
 
         // (站立 || 行走) => 普攻
-        if (InputPreInput.GetKeyDown(attackKey, 0.1f) && (activeState == "Stand" || activeState == "Walk"))
+        if (InputPreInput.GetKeyDown(attackKey, attackInputBuffer) && (activeState == StandStateName || activeState == WalkStateName))
         {
-            _stateMachine.TransitionTo("Attack");
+            _pendingFloatAttack = false;
+            _stateMachine.TransitionTo(AttackStateName);
             InputPreInput.ConsumeBufferedKeyDown(attackKey);
         }
 
-        // 跳跃 => 浮空普攻
-        if (InputPreInput.GetKeyDown(attackKey, 0.1f) && activeState == "Jump")
+        if (InputPreInput.GetKeyDown(attackKey, attackInputBuffer) && (activeState == JumpSubStateName || activeState == FloatingSubStateName))
         {
             _skipJumpExitVelocityReset = true;
             _preserveJumpHoldTimer = true;
+            _pendingFloatAttack = true;
             InputPreInput.ConsumeBufferedKeyDown(attackKey);
-            _stateMachine.TransitionTo("FloatAttack");
+            _stateMachine.TransitionTo(AttackStateName);
         }
     }
 
@@ -257,74 +304,86 @@ public class PlayerStateMachine : MonoBehaviour
     {
         _stateMachine = new HierarchicalStateMachine("Player");
 
-        // 站立
         var standState = new SimpleState(
-            "Stand",
+            StandStateName,
             enter: () =>
             {
                 SetSpriteColor(Color.white);
             },
             stay: StayStand);
 
-        // 行走
         var walkState = new SimpleState(
-            "Walk",
+            WalkStateName,
             enter: () =>
             {
                 SetSpriteColor(Color.gray);
             },
             stay: StayWalk);
 
-        // 跳跃
-        var jumpState = new SimpleState(
-            "Jump",
-            enter: StartJump,
-            stay: StayJump,
-            exit: ExitJump);
+        _groundMovementState = new HierarchicalStateMachine(GroundStateName)
+            .RegisterState(standState, true)
+            .RegisterState(walkState);
 
-        // 冲刺
+        var groundState = new HierarchicalStateProxy(_groundMovementState);
+
+        var floatingSubState = new SimpleState(
+            FloatingSubStateName,
+            stay: StayFloating);
+
+        var jumpSubState = new SimpleState(
+            JumpSubStateName,
+            enter: StartJump,
+            stay: StayJump);
+
+        _airMovementState = new HierarchicalStateMachine(AirStateName)
+            .RegisterState(floatingSubState, true)
+            .RegisterState(jumpSubState);
+
+        var airState = new HierarchicalStateProxy(
+            _airMovementState,
+            exit: ExitAirState);
+
         var dashState = new SimpleState(
             "Dash",
             enter: StartDash,
             stay: StayDash,
             exit: DashExit);
 
-        // 普攻
+        _attackStateMachine = new HierarchicalStateMachine("Attack")
+            .RegisterState(new SimpleState(
+                AttackGroundSubStateName,
+                enter: StartAttack,
+                stay: StayAttack,
+                exit: ExitAttack), true)
+            .RegisterState(new SimpleState(
+                AttackFloatSubStateName,
+                enter: StartFloatAttack,
+                stay: StayFloatAttack,
+                exit: ExitFloatAttack));
+
         var attackState = new SimpleState(
-            "Attack",
-            enter: StartAttack,
-            stay: StayAttack,
-            exit: ExitAttack);
+            AttackStateName,
+            enter: EnterAttackParentState,
+            stay: () => _attackStateMachine?.Stay(),
+            exit: () => _attackStateMachine?.Exit());
 
-        // 浮空普攻
-        var floatAttackState = new SimpleState(
-            "FloatAttack",
-            enter: StartFloatAttack,
-            stay: StayFloatAttack,
-            exit: ExitFloatAttack);
-
-        // 格挡
         var blockState = new SimpleState(
             "Block",
             enter: StartBlock,
             stay: StayBlock,
             exit: ExitBlock);
 
-        // 受伤
         var hurtState = new SimpleState(
             "Hurt",
             enter: StartHurt,
             stay: StayHurt,
             exit: ExitHurt);
 
-        // 注册状态
         _stateMachine
-            .RegisterState(standState, true)
-            .RegisterState(walkState)
-            .RegisterState(jumpState)
+            .RegisterState(groundState, true)
+            .RegisterState(airState)
             .RegisterState(dashState)
             .RegisterState(attackState)
-            .RegisterState(floatAttackState)
             .RegisterState(blockState)
             .RegisterState(hurtState);
     }
@@ -335,8 +394,7 @@ public class PlayerStateMachine : MonoBehaviour
         ApplyHorizontalMovement();
         if (!grounded)
         {
-            _shouldApplyJumpVelocity = false;
-            _stateMachine.TransitionTo("Jump");
+            SwitchToAirSubState(FloatingSubStateName);
         }
     }
 
@@ -345,8 +403,7 @@ public class PlayerStateMachine : MonoBehaviour
         ApplyHorizontalMovement();
         if (!grounded)
         {
-            _shouldApplyJumpVelocity = false;
-            _stateMachine.TransitionTo("Jump");
+            SwitchToAirSubState(FloatingSubStateName);
         }
     }
 
@@ -358,21 +415,10 @@ public class PlayerStateMachine : MonoBehaviour
     // ==== 跳跃逻辑 ==== //
     private void StartJump()
     {
-        if (_shouldApplyJumpVelocity)
-        {
-            vel.y = jumpVelocity;
-            _animator.SetTrigger(jumpAnimParam);
-            jumpHoldTimer.StartTimer(jumpHoldTime);
-            _shortHopApplied = false;
-        }
-        else
-        {
-            jumpHoldTimer.StopTimer();
-            _shortHopApplied = false;
-        }
-
-        grounded = false;
-        _shouldApplyJumpVelocity = true;
+        vel.y = jumpVelocity;
+        _animator.SetTrigger(jumpAnimParam);
+        jumpHoldTimer.StartTimer(jumpHoldTime);
+        _shortHopApplied = false;
     }
 
     private void StayJump()
@@ -380,14 +426,32 @@ public class PlayerStateMachine : MonoBehaviour
         ApplyHorizontalMovement();
         UpdateJumpVerticalMotion();
 
+        if ((vel.y <= 0f || !Input.GetKey(jumpKey)) && !_airMovementState.CurrentStateName.Equals(FloatingSubStateName))
+        {
+            _airMovementState.TransitionTo(FloatingSubStateName);
+            return;
+        }
+
         if (grounded && vel.y <= 0f)
         {
-            var nextState = _movementInput == Vector2.zero ? "Stand" : "Walk";
-            _stateMachine.TransitionTo(nextState);
+            var nextState = _movementInput == Vector2.zero ? StandStateName : WalkStateName;
+            SwitchToGroundSubState(nextState);
         }
     }
 
-    private void ExitJump()
+    private void StayFloating()
+    {
+        ApplyHorizontalMovement();
+        UpdateJumpVerticalMotion();
+
+        if (grounded && vel.y <= 0f)
+        {
+            var nextState = _movementInput == Vector2.zero ? StandStateName : WalkStateName;
+            SwitchToGroundSubState(nextState);
+        }
+    }
+
+    private void ExitAirState()
     {
         if (!_skipJumpExitVelocityReset)
         {
@@ -402,6 +466,46 @@ public class PlayerStateMachine : MonoBehaviour
         _shortHopApplied = false;
         _skipJumpExitVelocityReset = false;
         _preserveJumpHoldTimer = false;
+    }
+
+    private void SwitchToGroundSubState(string targetSubState)
+    {
+        if (string.IsNullOrWhiteSpace(targetSubState) ||
+            _groundMovementState == null ||
+            _stateMachine == null)
+        {
+            return;
+        }
+
+        if (_stateMachine.CurrentStateName != GroundStateName)
+        {
+            _stateMachine.TransitionTo(GroundStateName);
+        }
+
+        _groundMovementState.TransitionTo(targetSubState);
+    }
+
+    private void SwitchToAirSubState(string targetSubState)
+    {
+        if (string.IsNullOrWhiteSpace(targetSubState) ||
+            _airMovementState == null ||
+            _stateMachine == null)
+        {
+            return;
+        }
+
+        if (_stateMachine.CurrentStateName == AirStateName &&
+            _airMovementState.CurrentStateName == targetSubState)
+        {
+            return;
+        }
+
+        if (_stateMachine.CurrentStateName != AirStateName)
+        {
+            _stateMachine.TransitionTo(AirStateName);
+        }
+
+        _airMovementState.TransitionTo(targetSubState);
     }
 
     private void UpdateJumpVerticalMotion()
@@ -422,6 +526,7 @@ public class PlayerStateMachine : MonoBehaviour
     private void StartDash()
     {
         SetSpriteColor(Color.blue);
+        _animator.Play(dashAnimName);
 
         if (_dashCoroutine != null)
         {
@@ -435,7 +540,8 @@ public class PlayerStateMachine : MonoBehaviour
         var step = Vector2.right * _facingDirection * dashDistance;
         yield return this.MoveByStep(step, dashDuration, 0.3f);
         _dashCoroutine = null;
-        _stateMachine.TransitionTo("Stand");
+        var nextState = _movementInput == Vector2.zero ? StandStateName : WalkStateName;
+        SwitchToGroundSubState(nextState);
     }
 
     private void StayDash()
@@ -450,6 +556,7 @@ public class PlayerStateMachine : MonoBehaviour
             StopCoroutine(_dashCoroutine);
             _dashCoroutine = null;
         }
+
         dashCDTimer.StartTimer(dashCooldown);
     }
 
@@ -474,7 +581,8 @@ public class PlayerStateMachine : MonoBehaviour
         var step = KbDir * hurtKbDistance;
         yield return this.MoveByStep(step, hurtDuration, 0.8f);
         _hurtCoroutine = null;
-        _stateMachine.TransitionTo("Stand");
+        var nextState = _movementInput == Vector2.zero ? StandStateName : WalkStateName;
+        SwitchToGroundSubState(nextState);
     }
 
     private void StayHurt()
@@ -491,9 +599,21 @@ public class PlayerStateMachine : MonoBehaviour
     }
 
     // ==== 攻击逻辑 ==== //
+    private void EnterAttackParentState()
+    {
+        if (_attackStateMachine == null)
+        {
+            return;
+        }
+
+        var targetSubState = _pendingFloatAttack ? AttackFloatSubStateName : AttackGroundSubStateName;
+        _attackStateMachine.TransitionTo(targetSubState);
+    }
+
     private void StartAttack()
     {
-        _animator.SetTrigger(attackAnimParam);
+        AdjustAnimatorSpeedForClip(attackAnimParam, attackDuration);
+        _animator.Play(attackAnimParam, 0, 0);
         vel = Vector2.zero;
         if (_attackCoroutine != null)
         {
@@ -510,13 +630,15 @@ public class PlayerStateMachine : MonoBehaviour
 
     private IEnumerator AttackRoutine()
     {
-        yield return this.Wait(0.4f);
+        yield return new WaitForSeconds(attackDuration);
         _attackCoroutine = null;
-        _stateMachine.TransitionTo("Stand");
+        var nextState = _movementInput == Vector2.zero ? StandStateName : WalkStateName;
+        SwitchToGroundSubState(nextState);
     }
 
     private void ExitAttack()
     {
+        ResetAnimatorSpeed();
         if (_attackCoroutine != null)
         {
             StopCoroutine(_attackCoroutine);
@@ -529,7 +651,8 @@ public class PlayerStateMachine : MonoBehaviour
     // ==== 浮空攻击 ==== //
     private void StartFloatAttack()
     {
-        _animator.SetTrigger(attackAnimParam);
+        AdjustAnimatorSpeedForClip(attackAnimParam, floatAttackDuration);
+        _animator.Play(attackAnimParam, 0, 0);
         if (_floatAttackCoroutine != null)
         {
             StopCoroutine(_floatAttackCoroutine);
@@ -552,20 +675,22 @@ public class PlayerStateMachine : MonoBehaviour
 
     private IEnumerator FloatAttackRoutine()
     {
-        yield return this.Wait(0.4f);
-        _floatAttackCoroutine = null; 
+        yield return new WaitForSeconds(floatAttackDuration);
+        _floatAttackCoroutine = null;
         if (grounded)
         {
-            _stateMachine.TransitionTo("Stand");
+            var nextState = _movementInput == Vector2.zero ? StandStateName : WalkStateName;
+            SwitchToGroundSubState(nextState);
         }
-        else {
-            _shouldApplyJumpVelocity = false;
-            _stateMachine.TransitionTo("Jump");
+        else
+        {
+            SwitchToAirSubState(FloatingSubStateName);
         }
     }
 
     private void ExitFloatAttack()
     {
+        ResetAnimatorSpeed();
         if (_floatAttackCoroutine != null)
         {
             StopCoroutine(_floatAttackCoroutine);
@@ -573,6 +698,51 @@ public class PlayerStateMachine : MonoBehaviour
         }
 
         SetSpriteColor(Color.white);
+    }
+
+    private void AdjustAnimatorSpeedForClip(string clipName, float desiredDuration)
+    {
+        if (_animator == null)
+        {
+            return;
+        }
+
+        var clip = GetAnimationClipByName(clipName);
+        if (clip == null || desiredDuration <= 0f)
+        {
+            _animator.speed = _defaultAnimatorSpeed;
+            return;
+        }
+
+        _animator.speed = clip.length / desiredDuration;
+    }
+
+    private AnimationClip GetAnimationClipByName(string clipName)
+    {
+        if (_animator == null || _animator.runtimeAnimatorController == null)
+        {
+            return null;
+        }
+
+        foreach (var clip in _animator.runtimeAnimatorController.animationClips)
+        {
+            if (clip.name == clipName)
+            {
+                return clip;
+            }
+        }
+
+        return null;
+    }
+
+    private void ResetAnimatorSpeed()
+    {
+        if (_animator == null)
+        {
+            return;
+        }
+
+        _animator.speed = _defaultAnimatorSpeed;
     }
 
     // ==== 格挡流程 ==== //
@@ -586,8 +756,11 @@ public class PlayerStateMachine : MonoBehaviour
 
     private void StayBlock()
     {
-        if(!blockActionChain.IsPlaying)
-            _stateMachine.TransitionTo("Stand");
+        if (!blockActionChain.IsPlaying)
+        {
+            var nextState = _movementInput == Vector2.zero ? StandStateName : WalkStateName;
+            SwitchToGroundSubState(nextState);
+        }
     }
 
     private void ExitBlock()
@@ -727,7 +900,7 @@ public class PlayerStateMachine : MonoBehaviour
         IEnumerator SuccessfulBlockAction(MonoBehaviour _)
         {
             SetSpriteColor(Color.cyan);
-            invincibleTimer.StartTimer(blockSucceededDuration + 0.1f);
+            invincibleTimer.StartTimer(blockSucceededDuration + 0.4f);
             tryCatchInfo = false;
             float elapsed = 0f;
             while (elapsed < blockSucceededDuration)
@@ -821,24 +994,28 @@ public class PlayerStateMachine : MonoBehaviour
     {
         if (other.TryGetComponent<AttackHitInfo>(out var hitInfo))
         {
+            if (hitInfo.used) return;
             var incoming = new HitInfo
             {
                 Damage = hitInfo.Damage,
                 Grade = hitInfo.Grade,
                 StunDuration = hitInfo.StunDuration,
                 ParryWindow = hitInfo.ParryWindow,
-                Source = hitInfo.Source
+                Source = hitInfo.Source,
+                used = hitInfo.used
             };
             if (tryCatchInfo)
             {
                 Debug.Log("格挡状态下收到攻击");
                 BlockedHitInfo = incoming;
+                hitInfo.used = true;
                 incomingHitInfo.Clear();
             }
             else if (!invincibleTimer.IsRunning)
             {
                 Debug.Log("常态下收到攻击");
                 incomingHitInfo = incoming;
+                hitInfo.used = true;
                 BlockedHitInfo.Clear();
                 ProcessIncomingHit();
             }
@@ -862,7 +1039,11 @@ public class PlayerStateMachine : MonoBehaviour
         if (_groundContacts.Remove(collision.collider) && _groundContacts.Count == 0)
         {
             grounded = false;
-            TryEnterJumpFromFall();
+            var state = ActiveState;
+            if (!grounded && (state == StandStateName || state == WalkStateName))
+            {
+                SwitchToAirSubState(FloatingSubStateName);
+            }
         }
     }
 
@@ -874,16 +1055,6 @@ public class PlayerStateMachine : MonoBehaviour
     private void OnTriggerStay2D(Collider2D other)
     {
         HandleIncomingAttack(other.gameObject);
-    }
-
-    private void TryEnterJumpFromFall()
-    {
-        var state = ActiveState;
-        if (!grounded && (state == "Stand" || state == "Walk"))
-        {
-            _shouldApplyJumpVelocity = false;
-            _stateMachine.TransitionTo("Jump");
-        }
     }
 
     // ==== 视觉与状态工具 ==== //

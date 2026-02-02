@@ -18,4 +18,6 @@ public class AttackHitInfo : MonoBehaviour
     public float ParryWindow = 0.2f;
 
     public GameObject Source => gameObject;
+
+    public bool used = false;
 }

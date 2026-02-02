@@ -159,7 +159,7 @@ Rigidbody2D:
   m_Interpolate: 0
   m_SleepingMode: 1
   m_CollisionDetection: 0
-  m_Constraints: 0
+  m_Constraints: 4
 --- !u!114 &3556975864015512452
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -177,6 +177,7 @@ MonoBehaviour:
   blockAnimParam: block
   walkAnimParam: walking
   floatAnimParam: floating
+  dashAnimName: dash
   moveLeftKey: 97
   moveRightKey: 100
   attackKey: 106
@@ -193,9 +194,12 @@ MonoBehaviour:
   jumpHoldTime: 0.08
   shortHopFactor: 0.1
   gravity: 24
+  attackInputBuffer: 0.1
+  attackDuration: 0.2
+  floatAttackDuration: 0.2
   blockInputBuffer: 0.15
   blockDuration: 0.4
-  blockSucceededDuration: 0.6
+  blockSucceededDuration: 0
   parrySucceededDuration: 0.8
   parryFailDuration: 0.8
   hurtKbDistance: 2
