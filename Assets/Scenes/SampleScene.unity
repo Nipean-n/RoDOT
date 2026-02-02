@@ -733,6 +733,10 @@ PrefabInstance:
       propertyPath: m_Constraints
       value: 4
       objectReference: {fileID: 0}
+    - target: {fileID: 3556975864015512452, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
+      propertyPath: walkSpeed
+      value: 4
+      objectReference: {fileID: 0}
     - target: {fileID: 5865579426773759057, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
