@@ -3096,7 +3096,7 @@ GameObject:
   - component: {fileID: 1333555941}
   - component: {fileID: 1333555944}
   - component: {fileID: 1333555945}
-  m_Layer: 0
+  m_Layer: 3
   m_Name: T_Projectile
   m_TagString: Attack1
   m_Icon: {fileID: 0}
@@ -4421,6 +4421,22 @@ PrefabInstance:
     - target: {fileID: 5865579426773759057, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6106787045692689996, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
+      propertyPath: m_SpriteTilingProperty.pivot.x
+      value: 0.42
+      objectReference: {fileID: 0}
+    - target: {fileID: 6106787045692689996, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
+      propertyPath: m_SpriteTilingProperty.pivot.y
+      value: 0.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 6106787045692689996, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
+      propertyPath: m_SpriteTilingProperty.oldSize.x
+      value: 2.95
+      objectReference: {fileID: 0}
+    - target: {fileID: 6106787045692689996, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
+      propertyPath: m_SpriteTilingProperty.oldSize.y
+      value: 2.0514772
       objectReference: {fileID: 0}
     - target: {fileID: 7582776332695481402, guid: 9aa70fc797a61d84eab2cfd4a021246a, type: 3}
       propertyPath: m_Name
